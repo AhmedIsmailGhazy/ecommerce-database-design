@@ -171,6 +171,7 @@ psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f database/01_schema.sql
 psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f database/02_sample_data.sql
 psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f database/03_indexes.sql
 psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f database/04_customer_summary_view.sql
+psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f database/05_checkout_function.sql
 ```
 
 Alternatively, use **pgAdmin → Databases → ecommerce_db → Query Tool** and open/execute each file in the same order.
