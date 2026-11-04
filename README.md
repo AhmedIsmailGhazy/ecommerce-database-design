@@ -280,6 +280,7 @@ ecommerce-database-design/
 │   ├── 02_sample_data.sql
 │   ├── 03_indexes.sql
 │   └── 04_customer_summary_view.sql
+    └── 05_checkout_function.sql
 ├── diagrams/
 │   └── ecommerce_erd.drawio
 ├── docs/
@@ -295,6 +296,67 @@ ecommerce-database-design/
 └── README.md
 ```
 
+## Transactional Checkout Function
+
+The project includes a reusable PostgreSQL function for
+single-product checkout operations:
+
+[`database/05_checkout_function.sql`](database/05_checkout_function.sql)
+
+### Features
+
+- Validates the customer and active product.
+- Validates the requested quantity.
+- Captures the current product price.
+- Performs atomic inventory deduction.
+- Creates an order and its associated order item.
+- Calculates and stores the order total.
+- Returns the created order ID, order number, and total.
+
+### Usage Example
+
+```sql
+BEGIN;
+
+SELECT *
+FROM public.create_checkout_order(
+    (SELECT customer_id
+     FROM public.customers
+     WHERE email = 'demo.ahmed@example.invalid'),
+
+    (SELECT product_id
+     FROM public.products
+     WHERE sku = 'DEMO-LAPTOP-001'),
+
+    1,
+    'README-CHECKOUT-TEST-001'
+);
+
+ROLLBACK;
+```
+
+The example uses ROLLBACK to prevent permanent
+changes to the sample database.
+
+### Transaction Safety
+
+The function uses an atomic inventory update
+with a stock availability condition to prevent
+deducting more units than are available.
+
+Database constraints reject duplicate order numbers,
+and errors during execution roll back changes made
+by the failed function call.
+
+### Current Scope
+
+- Supports one product per checkout operation.
+- Multi-product checkout is not yet implemented.
+- Idempotent retries are not implemented.
+- Automated concurrency testing is still pending.
+- Payment and shipping processes are out of scope.
+
+
 ## Current Limitations
 
 - No backend/frontend, authentication service, payment flow, shipping, tax, refund or multi-currency support.
@@ -308,7 +370,8 @@ ecommerce-database-design/
 ## Roadmap
 
 - [ ] Add CTE and window-function reporting examples (customer rankings, trends).
-- [ ] Add transactional order creation, stock validation, and order-total synchronization.
+- [ ] Implement a single-product transactional checkout function.
+- [ ] Extend checkout to multi-product orders and validate concurrent transactions.
 - [ ] Add automated integrity tests on a clean database.
 - [ ] Benchmark with realistic volumes and document query-plan comparisons.
 - [ ] Evaluate materialized views only after measuring query workloads.
