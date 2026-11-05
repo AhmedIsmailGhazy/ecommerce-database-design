@@ -19,6 +19,7 @@ A hands-on **relational database design and SQL reporting** project for an e-com
 - [Indexes and Query Performance](#indexes-and-query-performance)
 - [Normalization and Denormalization](#normalization-and-denormalization)
 - [Repository Structure](#repository-structure)
+- [Transactional Checkout Function](#transactional-checkout-function)
 - [Current Limitations](#current-limitations)
 - [Roadmap](#roadmap)
 - [Project Reference](#project-reference)
@@ -68,6 +69,12 @@ The first version has **six** tables:
 `order_items` resolves the conceptual many-to-many relationship between orders and products. The shared PK/FK limits each product to **at most one** inventory row; creating an inventory row for *every* product is an additional application/transaction rule.
 
 ## Entity Relationship Diagram
+
+![E-Commerce Database ERD](diagrams/ecommerce_erd.png)
+
+[View high-resolution SVG](diagrams/ecommerce_erd.svg) · [Edit the draw.io source](diagrams/ecommerce_erd.drawio)
+
+### Logical schema (Mermaid)
 
 ```mermaid
 erDiagram
@@ -120,7 +127,7 @@ erDiagram
     }
 ```
 
-[Open the editable draw.io ERD](diagrams/ecommerce_erd.drawio). The diagram above is a README visualization of the same logical schema; refer to the schema SQL for definitive constraints.
+The diagrams illustrate the six-table schema; refer to [`database/01_schema.sql`](database/01_schema.sql) for definitive constraints.
 
 ## Schema and Data Integrity
 
@@ -279,10 +286,12 @@ ecommerce-database-design/
 │   ├── 01_schema.sql
 │   ├── 02_sample_data.sql
 │   ├── 03_indexes.sql
-│   └── 04_customer_summary_view.sql
-    └── 05_checkout_function.sql
+│   ├── 04_customer_summary_view.sql
+│   └── 05_checkout_function.sql
 ├── diagrams/
-│   └── ecommerce_erd.drawio
+│   ├── ecommerce_erd.drawio
+│   ├── ecommerce_erd.png
+│   └── ecommerce_erd.svg
 ├── docs/
 │   ├── 01_database_requirements.md
 │   └── 02_normalization_and_denormalization.md
@@ -298,36 +307,28 @@ ecommerce-database-design/
 
 ## Transactional Checkout Function
 
-The project includes a reusable PostgreSQL function for
-single-product checkout operations:
-
-[`database/05_checkout_function.sql`](database/05_checkout_function.sql)
+[`database/05_checkout_function.sql`](database/05_checkout_function.sql) defines a reusable
+**single-product** checkout operation in PostgreSQL.
 
 ### Features
 
-- Validates the customer and active product.
-- Validates the requested quantity.
-- Captures the current product price.
-- Performs atomic inventory deduction.
-- Creates an order and its associated order item.
-- Calculates and stores the order total.
-- Returns the created order ID, order number, and total.
+- Validates the customer, active product, requested quantity, and order number.
+- Captures the current product price under a shared row lock.
+- Uses a conditional atomic stock update to prevent negative inventory.
+- Inserts a `PENDING` order and one order item with its historical unit-price snapshot.
+- Calculates the stored order total and returns the new order's details.
 
-### Usage Example
+### Usage example (development database only)
 
 ```sql
 BEGIN;
 
 SELECT *
 FROM public.create_checkout_order(
-    (SELECT customer_id
-     FROM public.customers
+    (SELECT customer_id FROM public.customers
      WHERE email = 'demo.ahmed@example.invalid'),
-
-    (SELECT product_id
-     FROM public.products
+    (SELECT product_id FROM public.products
      WHERE sku = 'DEMO-LAPTOP-001'),
-
     1,
     'README-CHECKOUT-TEST-001'
 );
@@ -335,33 +336,26 @@ FROM public.create_checkout_order(
 ROLLBACK;
 ```
 
-The example uses ROLLBACK to prevent permanent
-changes to the sample database.
+The caller controls the transaction; **the function does not COMMIT**.
+The example uses `ROLLBACK` to undo its demonstration changes.
 
-### Transaction Safety
+### Tests and limitations
 
-The function uses an atomic inventory update
-with a stock availability condition to prevent
-deducting more units than are available.
+Manual experiments have verified rejection of a duplicate order number
+(`SQLSTATE 23505`), rollback of inventory changes, and row-lock contention
+(`SQLSTATE 55P03`). The **two-session test after a successful COMMIT remains
+incomplete** and there is no automated regression suite yet.
 
-Database constraints reject duplicate order numbers,
-and errors during execution roll back changes made
-by the failed function call.
-
-### Current Scope
-
-- Supports one product per checkout operation.
-- Multi-product checkout is not yet implemented.
-- Idempotent retries are not implemented.
-- Automated concurrency testing is still pending.
-- Payment and shipping processes are out of scope.
-
+The function does not support multi-product carts, idempotent retries,
+payment collection, returns, or restocking after cancellation. Direct writes
+outside the function can bypass checkout invariants. It is not a production-ready
+checkout service.
 
 ## Current Limitations
 
 - No backend/frontend, authentication service, payment flow, shipping, tax, refund or multi-currency support.
-- Checkout, stock reservation and inventory changes are **not implemented** as a reliable end-to-end transactional workflow.
-- `orders.total_amount` is updated for demo seed rows, **not automatically enforced on every order-item modification**.
+- Single-product checkout is implemented as a demonstration function; complete cart checkout, payment processing, and end-to-end stock lifecycle are not implemented.
+- `orders.total_amount` is maintained by the seed and checkout function, **not automatically enforced for arbitrary direct modifications** of `order_items`.
 - `inventory.updated_at` has a default on insert but no automatic update trigger.
 - Valid order-status values are checked, but allowed state **transitions** are not enforced.
 - A product can have zero inventory rows unless product creation explicitly supplies one; an order can exist without order items until the application workflow prevents it.
@@ -370,8 +364,8 @@ by the failed function call.
 ## Roadmap
 
 - [ ] Add CTE and window-function reporting examples (customer rankings, trends).
-- [ ] Implement a single-product transactional checkout function.
-- [ ] Extend checkout to multi-product orders and validate concurrent transactions.
+- [x] Implement a single-product transactional checkout function.
+- [ ] Extend checkout to multi-product orders and finish two-session COMMIT concurrency verification.
 - [ ] Add automated integrity tests on a clean database.
 - [ ] Benchmark with realistic volumes and document query-plan comparisons.
 - [ ] Evaluate materialized views only after measuring query workloads.
