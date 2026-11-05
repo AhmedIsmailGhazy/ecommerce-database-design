@@ -20,6 +20,7 @@ A hands-on **relational database design and SQL reporting** project for an e-com
 - [Normalization and Denormalization](#normalization-and-denormalization)
 - [Repository Structure](#repository-structure)
 - [Transactional Checkout Function](#transactional-checkout-function)
+- [Database Testing](#database-testing)
 - [Current Limitations](#current-limitations)
 - [Roadmap](#roadmap)
 - [Project Reference](#project-reference)
@@ -302,6 +303,9 @@ ecommerce-database-design/
 │   ├── 04_monthly_top_products.sql
 │   ├── 05_customers_over_300_sar.sql
 │   └── README.md
+├── tests/
+│   ├── 01_checkout_tests.sql
+│   └── 02_concurrency_tests.sql
 └── README.md
 ```
 
@@ -341,15 +345,35 @@ The example uses `ROLLBACK` to undo its demonstration changes.
 
 ### Tests and limitations
 
-Manual experiments have verified rejection of a duplicate order number
-(`SQLSTATE 23505`), rollback of inventory changes, and row-lock contention
-(`SQLSTATE 55P03`). The **two-session test after a successful COMMIT remains
-incomplete** and there is no automated regression suite yet.
+Five repeatable checkout checks passed locally on PostgreSQL 17: successful checkout, rollback, insufficient stock, duplicate order number (`23505`), and invalid quantity.
+
+The **manual two-session concurrency test also passed**: Session B encountered a row-lock timeout (`55P03`) while Session A held the inventory lock. After Session A committed its purchase of 10 units, Session B's retry was rejected for insufficient stock (`P0001`). Final verification showed 5 remaining units, 1 successful order, 0 rejected orders persisted, and 10 purchased units. These observations validate the tested scenario, not every concurrent execution schedule.
 
 The function does not support multi-product carts, idempotent retries,
 payment collection, returns, or restocking after cancellation. Direct writes
 outside the function can bypass checkout invariants. It is not a production-ready
 checkout service.
+
+## Database Testing
+
+The repository includes two checkout testing artifacts:
+
+| Test file | Type | Observed result |
+| --- | --- | --- |
+| [01_checkout_tests.sql](tests/01_checkout_tests.sql) | Repeatable single-session regression checks | **5/5 PASS** on PostgreSQL 17 |
+| [02_concurrency_tests.sql](tests/02_concurrency_tests.sql) | Manual two-session concurrency procedure | **PASS** for the documented scenario (`55P03` followed by `P0001`) |
+
+Run the five checkout regression checks against a **development/test database** with demo data and the checkout function already installed:
+
+```bash
+psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f tests/01_checkout_tests.sql
+```
+
+Expected output: five `PASS` notices and a final `ROLLBACK`. This test does not keep its test orders or stock deductions.
+
+The concurrency procedure requires **two independent database sessions** and manually coordinated steps. Follow [the test instructions](tests/02_concurrency_tests.sql) section by section; **do not execute the entire file as an automated concurrency test**. Its fixture resets stock for a dedicated product, so run it on an isolated disposable test database, not production.
+
+Automated two-session concurrency tests and CI integration remain future work.
 
 ## Current Limitations
 
@@ -359,14 +383,16 @@ checkout service.
 - `inventory.updated_at` has a default on insert but no automatic update trigger.
 - Valid order-status values are checked, but allowed state **transitions** are not enforced.
 - A product can have zero inventory rows unless product creation explicitly supplies one; an order can exist without order items until the application workflow prevents it.
-- No automated database tests or CI pipeline yet; performance measurements use a very small data set.
+- Repeatable checkout regression tests exist but are not integrated into CI; concurrency tests still require manual coordination. Performance measurements use a very small data set.
 
 ## Roadmap
 
 - [ ] Add CTE and window-function reporting examples (customer rankings, trends).
 - [x] Implement a single-product transactional checkout function.
-- [ ] Extend checkout to multi-product orders and finish two-session COMMIT concurrency verification.
-- [ ] Add automated integrity tests on a clean database.
+- [x] Verify two-session checkout concurrency after COMMIT (manual test).
+- [ ] Extend checkout to multi-product orders and automate concurrency verification.
+- [x] Add repeatable checkout regression checks (5/5 PASS locally).
+- [ ] Run the checks in CI against a fresh database.
 - [ ] Benchmark with realistic volumes and document query-plan comparisons.
 - [ ] Evaluate materialized views only after measuring query workloads.
 - [ ] Consider payments, shipping, reviews, promotions, and migration tooling in later versions.
