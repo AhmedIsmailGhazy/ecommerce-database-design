@@ -1,328 +1,104 @@
+
 # E-Commerce Database Design & SQL Analytics
 
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-316192?logo=postgresql&logoColor=white) ![Language](https://img.shields.io/badge/Language-SQL-blue) ![Project](https://img.shields.io/badge/Type-Database%20Design-informational) ![Status](https://img.shields.io/badge/Status-Educational%20Project-orange)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-316192?logo=postgresql&logoColor=white)
+![SQL](https://img.shields.io/badge/SQL-PL%2FpgSQL-4479A1)
+![Flyway](https://img.shields.io/badge/Flyway-6%2F6%20Migrations%20Applied-success)
+![Status](https://img.shields.io/badge/Status-Portfolio%20Project%20Complete-2E7D32)
 
-A hands-on **relational database design and SQL reporting** project for an e-commerce scenario, built with **PostgreSQL 17**. It demonstrates entity modeling, referential integrity, normalization decisions, sample data, reporting queries, indexing, and introductory query-plan analysis.
+A **PostgreSQL database engineering portfolio project** that demonstrates relational modeling, transactional checkout, inventory consistency, concurrency control, idempotent order processing, SQL analytics, and versioned schema migrations.
 
-> **Scope:** This is a database/SQL project, **not** a complete e-commerce website, REST API, payment processor, or production-ready checkout system.
+Designed and implemented using **PostgreSQL 17, SQL, PL/pgSQL, JSONB, and Flyway**, with architecture decisions and executable database tests documented alongside the code.
 
-## Table of Contents
+> **Scope:** This is a database-focused educational implementation—not a complete e-commerce application, REST API, payment platform, or production-ready checkout system.
 
-- [Goals](#goals)
-- [Technology](#technology)
-- [Database Model](#database-model)
-- [Entity Relationship Diagram](#entity-relationship-diagram)
-- [Schema and Data Integrity](#schema-and-data-integrity)
-- [Getting Started](#getting-started)
-- [Sample Data](#sample-data)
-- [SQL Reports](#sql-reports)
-- [Indexes and Query Performance](#indexes-and-query-performance)
-- [Normalization and Denormalization](#normalization-and-denormalization)
-- [Repository Structure](#repository-structure)
-- [Transactional Checkout Function](#transactional-checkout-function)
-- [Database Testing](#database-testing)
-- [Current Limitations](#current-limitations)
-- [Roadmap](#roadmap)
-- [Project Reference](#project-reference)
+## At a Glance
 
-## Goals
-
-- Model real-world customers, categories, products, stock, orders, and order lines.
-- Enforce keys, uniqueness, checks, and foreign-key relationships in PostgreSQL.
-- Preserve historical order-line pricing separately from current catalog prices.
-- Produce practical daily, monthly, yearly, product-ranking, and customer-value reports.
-- Explore PostgreSQL indexes and understand `EXPLAIN (ANALYZE, BUFFERS)` output.
-- Document normalization choices and explain when denormalization may be appropriate.
-
-## Technology
-
-| Tool | Purpose |
+| Area | Delivered |
 | --- | --- |
-| PostgreSQL 17 | Relational database management system |
-| SQL | Schema, integrity constraints, queries and analytics |
-| pgAdmin 4 | Database administration and query execution |
-| draw.io / diagrams.net | Editable ERD source |
-| GitHub | Version control and documentation |
+| Relational schema | 6 business tables with primary keys, foreign keys, uniqueness, and check constraints |
+| Checkout | Single-product, multi-product, and idempotent PL/pgSQL functions |
+| Transaction safety | Conditional inventory updates, row locking, transaction-scoped advisory locks |
+| Reporting | 9 analytical SQL reports and a reusable customer summary view |
+| Schema evolution | 6 ordered Flyway migrations |
+| Verification | 5 test scripts covering functional behavior and manual concurrency scenarios |
+| Documentation | ERD, database requirements, normalization notes, architecture, and ADRs |
+
+## Contents
+
+- [Architecture](#architecture)
+- [Database Model](#database-model)
+- [Transactional Checkout](#transactional-checkout)
+- [Concurrency and Idempotency](#concurrency-and-idempotency)
+- [Getting Started](#getting-started)
+- [Flyway Migrations](#flyway-migrations)
+- [SQL Reports](#sql-reports)
+- [Indexes and Query Plans](#indexes-and-query-plans)
+- [Testing and Verified Results](#testing-and-verified-results)
+- [Repository Structure](#repository-structure)
+- [Design Documentation](#design-documentation)
+- [Scope and Limitations](#scope-and-limitations)
+- [Author](#author)
+
+## Architecture
+
+The implementation places business-critical data rules in PostgreSQL:
+
+1. **Relational storage:** Customers, catalog, stock, order headers, and order lines.
+2. **Database operations:** PL/pgSQL checkout functions running within caller-controlled transactions.
+3. **Consistency controls:** Constraints, conditional stock updates, row locks, and order-number-based retry handling.
+4. **Analytics:** SQL reports and a non-materialized customer summary view.
+5. **Schema management:** Flyway versioned migrations with execution history.
+
+See [System Architecture](docs/03_system_architecture.md) for component responsibilities, checkout flows, and operational boundaries.
 
 ## Database Model
 
-The first version has **six** tables:
+The schema contains six business tables:
 
 | Table | Primary key | Responsibility |
 | --- | --- | --- |
-| `customers` | `customer_id` | Customer details and email uniqueness |
-| `categories` | `category_id` | Product classifications |
-| `products` | `product_id` | Catalog, SKU, current price and active flag |
-| `inventory` | `product_id` | Available quantity for a product |
-| `orders` | `order_id` | Customer orders, status, order number and stored total |
-| `order_items` | `order_item_id` | Product quantities and per-order unit-price snapshots |
+| `customers` | `customer_id` | Customer details and unique email |
+| `categories` | `category_id` | Product classification |
+| `products` | `product_id` | SKU, category, catalog price, active state |
+| `inventory` | `product_id` | Available stock for a product |
+| `orders` | `order_id` | Customer, unique order number, status, stored total |
+| `order_items` | `order_item_id` | Products, quantities, historical unit prices |
 
-### Relationships
-
-| Parent → child | Cardinality | Foreign key |
-| --- | --- | --- |
-| `customers` → `orders` | 1:N | `orders.customer_id` |
-| `categories` → `products` | 1:N | `products.category_id` |
-| `products` → `inventory` | 1:0..1 as enforced | `inventory.product_id` (also PK) |
-| `orders` → `order_items` | 1:N | `order_items.order_id` |
-| `products` → `order_items` | 1:N | `order_items.product_id` |
-
-`order_items` resolves the conceptual many-to-many relationship between orders and products. The shared PK/FK limits each product to **at most one** inventory row; creating an inventory row for *every* product is an additional application/transaction rule.
-
-## Entity Relationship Diagram
+### Entity Relationship Diagram
 
 ![E-Commerce Database ERD](diagrams/ecommerce_erd.png)
 
-[View high-resolution SVG](diagrams/ecommerce_erd.svg) · [Edit the draw.io source](diagrams/ecommerce_erd.drawio)
+[View the SVG](diagrams/ecommerce_erd.svg) · [Edit the draw.io diagram](diagrams/ecommerce_erd.drawio)
 
-### Logical schema (Mermaid)
+### Relationships and Integrity
 
-```mermaid
-erDiagram
-    CUSTOMERS ||--o{ ORDERS : places
-    CATEGORIES ||--o{ PRODUCTS : contains
-    PRODUCTS ||--o| INVENTORY : has
-    ORDERS ||--o{ ORDER_ITEMS : includes
-    PRODUCTS ||--o{ ORDER_ITEMS : appears_in
+- `customers` → `orders`: one-to-many.
+- `categories` → `products`: one-to-many.
+- `products` → `inventory`: one-to-zero-or-one (inventory uses `product_id` as PK and FK).
+- `orders` → `order_items`: one-to-many.
+- `products` → `order_items`: one-to-many.
+- A unique `(order_id, product_id)` constraint prevents repeated product lines within an order.
+- `BIGINT GENERATED ALWAYS AS IDENTITY` provides surrogate keys for independent entities.
+- `NUMERIC(12,2)` stores prices and monetary totals; check constraints disallow negative prices, stock, and totals.
+- Order item quantities must be positive, and order statuses belong to a constrained set.
+- Foreign keys protect relationships; they do not, by themselves, guarantee that every product has an inventory row or every order has items.
 
-    CUSTOMERS {
-        bigint customer_id PK
-        varchar first_name
-        varchar last_name
-        varchar email UK
-        text password_hash
-        timestamptz created_at
-    }
-    CATEGORIES {
-        bigint category_id PK
-        varchar name UK
-        text description
-    }
-    PRODUCTS {
-        bigint product_id PK
-        bigint category_id FK
-        varchar sku UK
-        varchar name
-        numeric price
-        boolean is_active
-    }
-    INVENTORY {
-        bigint product_id PK,FK
-        integer quantity_available
-        timestamptz updated_at
-    }
-    ORDERS {
-        bigint order_id PK
-        bigint customer_id FK
-        varchar order_number UK
-        varchar status
-        timestamptz placed_at
-        numeric total_amount
-    }
-    ORDER_ITEMS {
-        bigint order_item_id PK
-        bigint order_id FK
-        bigint product_id FK
-        integer quantity
-        numeric unit_price
-    }
-```
+**Historical price preservation:** `products.price` represents the current catalog price; `order_items.unit_price` records the price captured at checkout. `orders.total_amount` is a stored derived value maintained by the checkout functions, not automatically recalculated after arbitrary direct edits.
 
-The diagrams illustrate the six-table schema; refer to [`database/01_schema.sql`](database/01_schema.sql) for definitive constraints.
+## Transactional Checkout
 
-## Schema and Data Integrity
+Three database functions implement progressively richer checkout behavior.
 
-Core design rules implemented in [`database/01_schema.sql`](database/01_schema.sql):
-
-- `BIGINT GENERATED ALWAYS AS IDENTITY` for independent surrogate keys.
-- Primary keys and unique constraints (customer email, category name, product SKU, order number, and the `(order_id, product_id)` combination).
-- Foreign keys with restricted deletion of referenced business records.
-- `NUMERIC(12,2)` for monetary amounts, not floating-point.
-- Checks for nonnegative catalog price and stock, positive item quantity and nonnegative order-line price.
-- Allowed order statuses: `PENDING`, `CONFIRMED`, `SHIPPED`, `DELIVERED`, `CANCELLED`.
-- `TIMESTAMPTZ` for timestamps.
-
-**Historical pricing:** `order_items.unit_price` captures the price applicable to an order line and need not equal `products.price` after later catalog changes.
-
-**Security:** `password_hash` must contain a properly generated password hash in a real application; the supplied demo seed uses **non-authenticating placeholders**, not usable password credentials.
-
-## Getting Started
-
-### Prerequisites
-
-- PostgreSQL 17 installed and running; access through `psql` or pgAdmin 4.
-- Permission to create a database (or an existing empty database you control).
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/AhmedIsmailGhazy/ecommerce-database-design.git
-cd ecommerce-database-design
-```
-
-### 2. Create an empty database
-
-Connect to the default `postgres` database and execute:
-
-```sql
-CREATE DATABASE ecommerce_db WITH ENCODING = 'UTF8' TEMPLATE = template0;
-```
-
-> Run this once, outside a transaction, and only if `ecommerce_db` does not already exist. Use a separate development database if you already have local data you want to keep.
-
-### 3. Apply the SQL files in order
-
-Using `psql` from the project root (replace the username/host as appropriate):
-
-```bash
-psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f database/01_schema.sql
-psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f database/02_sample_data.sql
-psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f database/03_indexes.sql
-psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f database/04_customer_summary_view.sql
-psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f database/05_checkout_function.sql
-```
-
-Alternatively, use **pgAdmin → Databases → ecommerce_db → Query Tool** and open/execute each file in the same order.
-
-**Important:** `01_schema.sql` is intended for a fresh, empty database. `CREATE TABLE IF NOT EXISTS` does **not** migrate existing tables or verify their structure. Do not run these scripts against production data without reviewing them first.
-
-### 4. Verify
-
-```sql
-SELECT table_name
-FROM information_schema.tables
-WHERE table_schema = 'public'
-  AND table_type = 'BASE TABLE'
-ORDER BY table_name;
-
-SELECT o.order_number,
-       o.total_amount AS stored_total,
-       COALESCE(SUM(oi.quantity * oi.unit_price), 0) AS calculated_total
-FROM public.orders o
-LEFT JOIN public.order_items oi ON oi.order_id = o.order_id
-GROUP BY o.order_id, o.order_number, o.total_amount
-ORDER BY o.order_number;
-```
-
-The schema query should include the six model tables. The second query lets you confirm whether each stored order total matches its line items.
-
-## Sample Data
-
-[`database/02_sample_data.sql`](database/02_sample_data.sql) inserts an educational data set with two customers, two categories, three products and inventory records, two orders and three order items. The seed uses `ON CONFLICT DO NOTHING` for selected business keys and updates totals for its demo orders.
-
-| Order | Status | Expected total (SAR assumption) |
-| --- | --- | ---: |
-| `DEMO-ORD-001` | `PENDING` | 4,440.00 |
-| `DEMO-ORD-002` | `PENDING` | 900.00 |
-
-These totals are **order values, not recognized revenue**. The schema does not store a currency code; project examples **assume SAR** and must not be interpreted as supporting multiple currencies.
-
-## SQL Reports
-
-All reports are under [`reports/`](reports/). Open each SQL file in a Query Tool connected to `ecommerce_db`.
-
-| Report | Description |
-| --- | --- |
-| [01 — Daily sales](reports/01_daily_sales.sql) | Daily order counts and value metrics |
-| [02 — Monthly sales](reports/02_monthly_sales.sql) | Monthly order activity and value metrics |
-| [03 — Yearly sales](reports/03_yearly_sales.sql) | Annual order activity and value metrics |
-| [04 — Monthly top products](reports/04_monthly_top_products.sql) | Quantities and value of most-ordered products; excludes cancelled orders |
-| [05 — Customers over SAR 300](reports/05_customers_over_300_sar.sql) | Customers whose non-cancelled order values exceeded the threshold in the past month |
-
-The daily/monthly/yearly reports use **UTC order-placement dates**. In those reports, `recognized_revenue` is defined *for demonstration only* as the value of orders **currently** marked `DELIVERED`. No delivery timestamp is stored, so this is **not** revenue recognized on the date of delivery. Other report metrics may include pending orders; see [`reports/README.md`](reports/README.md) for exact definitions.
-
-### Example: monthly top-ordered products
-
-```sql
-SELECT p.sku, p.name AS product_name,
-       SUM(oi.quantity) AS total_quantity,
-       SUM(oi.quantity * oi.unit_price) AS total_order_value
-FROM public.products p
-JOIN public.order_items oi ON oi.product_id = p.product_id
-JOIN public.orders o ON o.order_id = oi.order_id
-WHERE o.placed_at >= DATE_TRUNC('month', CURRENT_TIMESTAMP)
-  AND o.placed_at < DATE_TRUNC('month', CURRENT_TIMESTAMP) + INTERVAL '1 month'
-  AND o.status <> 'CANCELLED'
-GROUP BY p.product_id, p.sku, p.name
-ORDER BY total_quantity DESC, total_order_value DESC;
-```
-
-This example uses the current session time zone. For the repository's UTC-based reporting convention, use the time-zone boundaries documented in [report 04](reports/04_monthly_top_products.sql).
-
-## Indexes and Query Performance
-
-[`database/03_indexes.sql`](database/03_indexes.sql) adds four supporting B-tree indexes:
-
-| Index | Column | Query use |
+| Function | Inputs | Behavior |
 | --- | --- | --- |
-| `idx_products_category_id` | `products(category_id)` | Category/product lookups |
-| `idx_orders_customer_id` | `orders(customer_id)` | Customer order history |
-| `idx_orders_placed_at` | `orders(placed_at)` | Date-range filtering |
-| `idx_order_items_product_id` | `order_items(product_id)` | Product-oriented joins |
+| [`create_checkout_order`](migrations/V4__create_checkout_function.sql) | Customer, product, quantity, order number | Atomically creates a single-product order |
+| [`create_multi_product_checkout`](migrations/V5__create_multi_product_checkout.sql) | Customer, order number, JSONB items | Validates and creates a multi-item order in one transaction |
+| [`create_idempotent_checkout`](migrations/V6__create_idempotent_checkout.sql) | Customer, order number, JSONB items | Returns a matching existing order on retry; rejects conflicts |
 
-PostgreSQL additionally creates indexes for `PRIMARY KEY` and `UNIQUE` constraints. The unique index on `order_items(order_id, product_id)` also supports predicates on its leading column (`order_id`), so a duplicate single-column index is not introduced in this version.
+### Single-product example
 
-Inspect the planner's actual strategy with:
-
-```sql
-EXPLAIN (ANALYZE, BUFFERS)
-SELECT * FROM public.orders WHERE customer_id = 1;
-```
-
-On the tiny demo data set, PostgreSQL may reasonably choose a sequential scan even with an available index. In a local exercise, a sequential scan took about **0.019 ms** and a forced index scan about **0.034 ms**. These are **illustrative single-run observations**, not robust benchmarks or evidence of production performance. Larger representative data sets and repeated trials are needed for meaningful comparisons.
-
-## Normalization and Denormalization
-
-The data model illustrates relational normalization by separating customer, category, catalog, order, and order-line facts. `order_items` captures historical price, while `orders.total_amount` is a **derived stored value** that must remain synchronized with order lines.
-
-[`database/04_customer_summary_view.sql`](database/04_customer_summary_view.sql) creates `public.v_customer_order_summary`, computing customers' non-cancelled order count and value without storing duplicate customer aggregates. A regular view does **not** physically materialize query results and therefore is not physical denormalization.
-
-See [Normalization and Denormalization Decisions](docs/02_normalization_and_denormalization.md) for discussion of 1NF/2NF/3NF, functional dependencies, and potential materialized/denormalized reporting strategies.
-
-## Repository Structure
-
-```text
-ecommerce-database-design/
-├── database/
-│   ├── 01_schema.sql
-│   ├── 02_sample_data.sql
-│   ├── 03_indexes.sql
-│   ├── 04_customer_summary_view.sql
-│   └── 05_checkout_function.sql
-├── diagrams/
-│   ├── ecommerce_erd.drawio
-│   ├── ecommerce_erd.png
-│   └── ecommerce_erd.svg
-├── docs/
-│   ├── 01_database_requirements.md
-│   └── 02_normalization_and_denormalization.md
-├── reports/
-│   ├── 01_daily_sales.sql
-│   ├── 02_monthly_sales.sql
-│   ├── 03_yearly_sales.sql
-│   ├── 04_monthly_top_products.sql
-│   ├── 05_customers_over_300_sar.sql
-│   └── README.md
-├── tests/
-│   ├── 01_checkout_tests.sql
-│   └── 02_concurrency_tests.sql
-└── README.md
-```
-
-## Transactional Checkout Function
-
-[`database/05_checkout_function.sql`](database/05_checkout_function.sql) defines a reusable
-**single-product** checkout operation in PostgreSQL.
-
-### Features
-
-- Validates the customer, active product, requested quantity, and order number.
-- Captures the current product price under a shared row lock.
-- Uses a conditional atomic stock update to prevent negative inventory.
-- Inserts a `PENDING` order and one order item with its historical unit-price snapshot.
-- Calculates the stored order total and returns the new order's details.
-
-### Usage example (development database only)
+Run in a **disposable test database with sample data loaded**:
 
 ```sql
 BEGIN;
@@ -334,73 +110,300 @@ FROM public.create_checkout_order(
     (SELECT product_id FROM public.products
      WHERE sku = 'DEMO-LAPTOP-001'),
     1,
-    'README-CHECKOUT-TEST-001'
+    'README-SINGLE-001'
 );
 
 ROLLBACK;
 ```
 
-The caller controls the transaction; **the function does not COMMIT**.
-The example uses `ROLLBACK` to undo its demonstration changes.
+### Multi-product example
 
-### Tests and limitations
+```sql
+BEGIN;
 
-Five repeatable checkout checks passed locally on PostgreSQL 17: successful checkout, rollback, insufficient stock, duplicate order number (`23505`), and invalid quantity.
+SELECT *
+FROM public.create_multi_product_checkout(
+    (SELECT customer_id FROM public.customers
+     WHERE email = 'demo.ahmed@example.invalid'),
+    'README-MULTI-001',
+    jsonb_build_array(
+        jsonb_build_object(
+            'product_id', (SELECT product_id FROM public.products WHERE sku = 'DEMO-LAPTOP-001'),
+            'quantity', 1
+        ),
+        jsonb_build_object(
+            'product_id', (SELECT product_id FROM public.products WHERE sku = 'DEMO-MOUSE-001'),
+            'quantity', 2
+        )
+    )
+);
 
-The **manual two-session concurrency test also passed**: Session B encountered a row-lock timeout (`55P03`) while Session A held the inventory lock. After Session A committed its purchase of 10 units, Session B's retry was rejected for insufficient stock (`P0001`). Final verification showed 5 remaining units, 1 successful order, 0 rejected orders persisted, and 10 purchased units. These observations validate the tested scenario, not every concurrent execution schedule.
-
-The function does not support multi-product carts, idempotent retries,
-payment collection, returns, or restocking after cancellation. Direct writes
-outside the function can bypass checkout invariants. It is not a production-ready
-checkout service.
-
-## Database Testing
-
-The repository includes two checkout testing artifacts:
-
-| Test file | Type | Observed result |
-| --- | --- | --- |
-| [01_checkout_tests.sql](tests/01_checkout_tests.sql) | Repeatable single-session regression checks | **5/5 PASS** on PostgreSQL 17 |
-| [02_concurrency_tests.sql](tests/02_concurrency_tests.sql) | Manual two-session concurrency procedure | **PASS** for the documented scenario (`55P03` followed by `P0001`) |
-
-Run the five checkout regression checks against a **development/test database** with demo data and the checkout function already installed:
-
-```bash
-psql -U postgres -d ecommerce_db -v ON_ERROR_STOP=1 -f tests/01_checkout_tests.sql
+ROLLBACK;
 ```
 
-Expected output: five `PASS` notices and a final `ROLLBACK`. This test does not keep its test orders or stock deductions.
+Both demonstrations intentionally roll back their changes. Checkout functions do **not** issue `COMMIT` or `ROLLBACK`; the caller controls the transaction. Exceptions must be handled by the caller.
 
-The concurrency procedure requires **two independent database sessions** and manually coordinated steps. Follow [the test instructions](tests/02_concurrency_tests.sql) section by section; **do not execute the entire file as an automated concurrency test**. Its fixture resets stock for a dedicated product, so run it on an isolated disposable test database, not production.
+## Concurrency and Idempotency
 
-Automated two-session concurrency tests and CI integration remain future work.
+### Inventory consistency
 
-## Current Limitations
+Checkout uses a **conditional atomic `UPDATE`** and checks whether a row was updated. If stock is insufficient, the function raises an exception instead of creating a successful sale.
 
-- No backend/frontend, authentication service, payment flow, shipping, tax, refund or multi-currency support.
-- Single-product checkout is implemented as a demonstration function; complete cart checkout, payment processing, and end-to-end stock lifecycle are not implemented.
-- `orders.total_amount` is maintained by the seed and checkout function, **not automatically enforced for arbitrary direct modifications** of `order_items`.
-- `inventory.updated_at` has a default on insert but no automatic update trigger.
-- Valid order-status values are checked, but allowed state **transitions** are not enforced.
-- A product can have zero inventory rows unless product creation explicitly supplies one; an order can exist without order items until the application workflow prevents it.
-- Repeatable checkout regression tests exist but are not integrated into CI; concurrency tests still require manual coordination. Performance measurements use a very small data set.
+```sql
+UPDATE public.inventory
+SET quantity_available = quantity_available - 1,
+    updated_at = CURRENT_TIMESTAMP
+WHERE product_id = 1
+  AND quantity_available >= 1;
+```
 
-## Roadmap
+Product row locks protect the captured price and active state. Multi-product checkout processes product IDs in ascending order to reduce the likelihood of deadlocks, though deadlocks remain possible in more complex workloads.
 
-- [ ] Add CTE and window-function reporting examples (customer rankings, trends).
-- [x] Implement a single-product transactional checkout function.
-- [x] Verify two-session checkout concurrency after COMMIT (manual test).
-- [ ] Extend checkout to multi-product orders and automate concurrency verification.
-- [x] Add repeatable checkout regression checks (5/5 PASS locally).
-- [ ] Run the checks in CI against a fresh database.
-- [ ] Benchmark with realistic volumes and document query-plan comparisons.
-- [ ] Evaluate materialized views only after measuring query workloads.
-- [ ] Consider payments, shipping, reviews, promotions, and migration tooling in later versions.
+### Retry-safe order creation
 
-## Project Reference
+`create_idempotent_checkout` uses a unique `orders.order_number` constraint and a transaction-scoped advisory lock derived from the order number. A retry with the **same customer, products, and quantities** returns the existing order without deducting inventory a second time. A conflicting retry raises an exception.
 
-Inspired by the educational database-design concepts in [Esraa-Khaled/E-Commerce](https://github.com/Esraa-Khaled/E-Commerce). This repository uses a separately evolved schema, reports, and documentation rather than reproducing the reference verbatim.
+This is **database-level order-number idempotency**, not a generic HTTP idempotency-key service. Advisory-lock hash collisions can theoretically cause unrelated order numbers to wait on the same lock.
+
+## Getting Started
+
+### Prerequisites
+
+- PostgreSQL 17 and a PostgreSQL login with sufficient schema privileges.
+- `psql` or pgAdmin 4.
+- Flyway CLI for the recommended versioned schema installation.
+- Git, or a ZIP download of the repository.
+
+### 1. Get the repository
+
+```bash
+git clone https://github.com/AhmedIsmailGhazy/ecommerce-database-design.git
+cd ecommerce-database-design
+```
+
+### 2. Create a dedicated empty database
+
+In pgAdmin, connect to an existing maintenance database (such as `postgres`), then run:
+
+```sql
+CREATE DATABASE ecommerce_flyway_test
+WITH ENCODING = 'UTF8' TEMPLATE = template0;
+```
+
+Create it only once. **Never replace or reinitialize a database containing data you need to preserve.**
+
+### 3. Apply versioned migrations
+
+On Windows PowerShell, open a terminal **from the repository root**, where the `migrations` folder is located. The commands below assume `flyway` is installed and available in your `PATH`. Otherwise, replace `flyway` with the full path to `flyway.cmd`.
+
+```powershell
+$env:FLYWAY_URL = 'jdbc:postgresql://localhost:5432/ecommerce_flyway_test'
+$env:FLYWAY_USER = 'postgres'
+$env:FLYWAY_LOCATIONS = 'filesystem:./migrations'
+
+$securePassword = Read-Host 'PostgreSQL password' -AsSecureString
+
+try {
+    $credential = [System.Net.NetworkCredential]::new('', $securePassword)
+    $env:FLYWAY_PASSWORD = $credential.Password
+
+    flyway info
+    if ($LASTEXITCODE -ne 0) { throw 'Flyway info failed' }
+
+    flyway migrate
+    if ($LASTEXITCODE -ne 0) { throw 'Flyway migrate failed' }
+
+    flyway info
+    if ($LASTEXITCODE -ne 0) { throw 'Final Flyway info failed' }
+}
+finally {
+    Remove-Item Env:FLYWAY_PASSWORD, Env:FLYWAY_USER, Env:FLYWAY_URL, Env:FLYWAY_LOCATIONS -ErrorAction SilentlyContinue
+    $credential = $null
+    $securePassword = $null
+}
+```
+
+Use **a different target database** from any existing hand-built development database. Do not run the manual schema initialization and Flyway initialization against the same database.
+
+### 4. Confirm the installed version
+
+Open pgAdmin Query Tool against `ecommerce_flyway_test`:
+
+```sql
+SELECT installed_rank, version, description, success, installed_on
+FROM public.flyway_schema_history
+ORDER BY installed_rank;
+```
+
+A successful fresh installation should report six versioned migrations, V1–V6, with `success = true`.
+
+### 5. Load optional sample data
+
+For the report and checkout examples, apply [`database/02_sample_data.sql`](database/02_sample_data.sql) to a **test** database *after* schema initialization. Sample data is intentionally separate from structural Flyway migrations.
+
+### Alternative: standalone SQL installation
+
+The [`database/`](database/) folder retains original educational scripts. In a **separate empty database not managed by Flyway**, execute them in filename order from `01_schema.sql` through `07_idempotent_checkout.sql` (including `02_sample_data.sql`). Do not apply both installation paths to one database.
+
+## Flyway Migrations
+
+| Version | Migration | Creates |
+| --- | --- | --- |
+| V1 | [`V1__create_schema.sql`](migrations/V1__create_schema.sql) | Tables, keys, foreign keys, and checks |
+| V2 | [`V2__create_indexes.sql`](migrations/V2__create_indexes.sql) | Supporting indexes |
+| V3 | [`V3__create_customer_summary_view.sql`](migrations/V3__create_customer_summary_view.sql) | Customer summary view |
+| V4 | [`V4__create_checkout_function.sql`](migrations/V4__create_checkout_function.sql) | Single-product checkout |
+| V5 | [`V5__create_multi_product_checkout.sql`](migrations/V5__create_multi_product_checkout.sql) | Multi-product checkout |
+| V6 | [`V6__create_idempotent_checkout.sql`](migrations/V6__create_idempotent_checkout.sql) | Idempotent checkout |
+
+**Observed migration verification — November 7, 2026:** Flyway OSS 13.12.1 connected to PostgreSQL 17.11 on `ecommerce_flyway_test`. All six migrations were applied successfully, and `public.flyway_schema_history` showed six `success = true` records (schema version V6). This confirms deployment success, not a new functional test run on the migrated database.
+
+Previously applied migration files should remain immutable; subsequent schema changes require new versioned migrations. Keep credentials out of Git.
+
+## SQL Reports
+
+Nine reporting queries are available in [`reports/`](reports/):
+
+| Report | Purpose |
+| --- | --- |
+| [01 — Daily sales](reports/01_daily_sales.sql) | Daily order and value metrics |
+| [02 — Monthly sales](reports/02_monthly_sales.sql) | Monthly performance |
+| [03 — Yearly sales](reports/03_yearly_sales.sql) | Annual performance |
+| [04 — Monthly top products](reports/04_monthly_top_products.sql) | Most ordered products during a month |
+| [05 — Customers over SAR 300](reports/05_customers_over_300_sar.sql) | Spending threshold within the past month |
+| [06 — Customer ranking](reports/06_customer_ranking.sql) | Rank customers by order activity/value |
+| [07 — Monthly sales growth](reports/07_monthly_sales_growth.sql) | Month-over-month change |
+| [08 — Top products by category](reports/08_top_products_by_category.sql) | Rankings within product categories |
+| [09 — Cumulative sales](reports/09_cumulative_sales.sql) | Running sales totals |
+
+The reporting layer demonstrates joins, aggregation, CTEs, date boundaries, window functions, and ranking. See [report definitions and caveats](reports/README.md).
+
+**Metric limitations:** Examples assume SAR but store no currency code. Daily/monthly/yearly report periods are based on UTC order-placement dates. An illustrative `recognized_revenue` measure uses orders *currently marked* `DELIVERED`; it is not a financial accounting implementation and does not represent revenue recognized on delivery dates.
+
+## Indexes and Query Plans
+
+Four additional B-tree indexes support common joins and filters:
+
+| Index | Column |
+| --- | --- |
+| `idx_products_category_id` | `products(category_id)` |
+| `idx_orders_customer_id` | `orders(customer_id)` |
+| `idx_orders_placed_at` | `orders(placed_at)` |
+| `idx_order_items_product_id` | `order_items(product_id)` |
+
+Primary-key and unique constraints create indexes as well. The composite unique constraint on `order_items(order_id, product_id)` also supports queries filtering by leading column `order_id`.
+
+Example plan inspection:
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT * FROM public.orders WHERE customer_id = 1;
+```
+
+On very small demonstration datasets, sequential scans can be cheaper than index scans. The repository does **not** claim production-scale performance measurements.
+
+## Testing and Verified Results
+
+| Script | Scope |
+| --- | --- |
+| [`01_checkout_tests.sql`](tests/01_checkout_tests.sql) | Single-product checkout, validation, rollback, stock handling |
+| [`02_concurrency_tests.sql`](tests/02_concurrency_tests.sql) | Manually coordinated, two-session inventory concurrency |
+| [`03_multi_product_checkout_tests.sql`](tests/03_multi_product_checkout_tests.sql) | Multi-product checkout cases |
+| [`04_idempotent_checkout_tests.sql`](tests/04_idempotent_checkout_tests.sql) | Repeated requests and conflicts |
+| [`05_concurrent_idempotency_tests.sql`](tests/05_concurrent_idempotency_tests.sql) | Manually coordinated concurrent retry behavior |
+
+### Previously observed local results
+
+| Area | Result |
+| --- | --- |
+| Single-product checkout tests | **5/5 passed** |
+| Multi-product checkout tests | **3/3 passed** |
+| Idempotent checkout tests | **4/4 passed** |
+| Manual inventory concurrency | Passed the documented scenario |
+| Manual concurrent idempotency | Passed the documented scenarios |
+| Flyway installation in test database | **6/6 migrations applied successfully** |
+
+These are observed **local development results**. The Flyway deployment was verified separately; the functional tests were **not reported as rerun** against `ecommerce_flyway_test`.
+
+**Safe execution:** Run tests only on disposable databases with the required fixtures. Read each script first. Concurrency scripts require separate database sessions and should not be executed as a single sequential automated script. Some fixtures modify inventory and test records.
+
+## Repository Structure
+
+```text
+ecommerce-database-design/
+├── database/
+│   ├── 01_schema.sql
+│   ├── 02_sample_data.sql
+│   ├── 03_indexes.sql
+│   ├── 04_customer_summary_view.sql
+│   ├── 05_checkout_function.sql
+│   ├── 06_multi_product_checkout.sql
+│   └── 07_idempotent_checkout.sql
+├── migrations/
+│   ├── V1__create_schema.sql
+│   ├── V2__create_indexes.sql
+│   ├── V3__create_customer_summary_view.sql
+│   ├── V4__create_checkout_function.sql
+│   ├── V5__create_multi_product_checkout.sql
+│   └── V6__create_idempotent_checkout.sql
+├── reports/
+│   ├── 01_daily_sales.sql
+│   ├── 02_monthly_sales.sql
+│   ├── 03_yearly_sales.sql
+│   ├── 04_monthly_top_products.sql
+│   ├── 05_customers_over_300_sar.sql
+│   ├── 06_customer_ranking.sql
+│   ├── 07_monthly_sales_growth.sql
+│   ├── 08_top_products_by_category.sql
+│   ├── 09_cumulative_sales.sql
+│   └── README.md
+├── tests/
+│   ├── 01_checkout_tests.sql
+│   ├── 02_concurrency_tests.sql
+│   ├── 03_multi_product_checkout_tests.sql
+│   ├── 04_idempotent_checkout_tests.sql
+│   └── 05_concurrent_idempotency_tests.sql
+├── diagrams/
+│   ├── ecommerce_erd.drawio
+│   ├── ecommerce_erd.png
+│   └── ecommerce_erd.svg
+├── docs/
+│   ├── 01_database_requirements.md
+│   ├── 02_normalization_and_denormalization.md
+│   ├── 03_system_architecture.md
+│   └── 04_architecture_decisions.md
+└── README.md
+```
+
+## Design Documentation
+
+- [Database Requirements](docs/01_database_requirements.md): data and functional scope.
+- [Normalization and Denormalization](docs/02_normalization_and_denormalization.md): modeling rationale and trade-offs.
+- [System Architecture](docs/03_system_architecture.md): components, transaction flows, and boundaries.
+- [Architecture Decision Records](docs/04_architecture_decisions.md): PostgreSQL, relational modeling, transaction safety, idempotency, Flyway, and historical pricing decisions.
+- [ERD source](diagrams/ecommerce_erd.drawio): editable visual database model.
+
+## Scope and Limitations
+
+The project's **defined database portfolio scope is complete**, but the implementation is not a full commerce platform. Specifically:
+
+- No frontend, REST API, payment processor, shipping or refund workflow.
+- No complete authentication/authorization system; sample password hashes are non-authenticating placeholders.
+- No complete order-state transition enforcement, taxation, or multi-currency accounting.
+- Direct writes outside checkout functions can bypass stored-total and stock invariants.
+- `inventory.updated_at` is updated by checkout logic but has no general automatic update trigger.
+- The schema permits products without inventory rows and order headers without order items.
+- Manual concurrency tests are scenario-based; there is no claimed exhaustive concurrency proof.
+- No claimed production-scale benchmarks, automated CI deployment, or production backup/recovery program.
+
+These are intentional scope boundaries, not claims of features implemented elsewhere.
+
+## Author
+
+**Ahmed Ismail Ghazy**  
+GitHub: [AhmedIsmailGhazy](https://github.com/AhmedIsmailGhazy)  
+Repository: [ecommerce-database-design](https://github.com/AhmedIsmailGhazy/ecommerce-database-design)
 
 ---
 
-**Maintained by:** [AhmedIsmailGhazy](https://github.com/AhmedIsmailGhazy) · Educational PostgreSQL / SQL portfolio project.
+*PostgreSQL-focused database engineering: relational integrity, transactional consistency, practical SQL analytics, and maintainable schema evolution.*
